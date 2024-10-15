@@ -40,6 +40,7 @@
 import os
 import numpy as np
 from datetime import datetime
+from dotenv import load_dotenv
 import dbldatagen as dg
 from pyspark.sql import SparkSession
 from dbldatagen import DataGenerator
@@ -49,32 +50,35 @@ from pyspark.sql.types import LongType, FloatType, IntegerType, StringType, \
                               ByteType, BinaryType, ArrayType, MapType, \
                               StructType, StructField
 
-class DataGen:
 
+load_dotenv()
+
+s3_data_bucket = os.getenv("S3_DATA_BUCKET")
+s3_data_prefix = os.getenv("S3_DATA_PREFIX")
+sf = os.getenv("ENV_SCALE_FACTOR", 1)
+
+
+class DataGen:
     '''Class to Generate Banking Data'''
 
     def __init__(self, spark):
         self.spark = spark
 
-    def dataGen(self, shuffle_partitions_requested = 100, partitions_requested = 100, data_rows = 100000):
-
+    def dataGen(self, shuffle_partitions_requested = 100, partitions_requested = 100, data_rows = int(1000*sf)):
         # partition parameters etc.
         self.spark.conf.set("spark.sql.shuffle.partitions", shuffle_partitions_requested)
-
         dataSpec = (DataGenerator(self.spark, rows=data_rows, partitions=partitions_requested)
                     .withColumn("col1", values=["A", "B", "C", "D", "E", "F", "G"]))
-
-        for i in range(2, 10000):
+        for i in range(2, int(10*sf)):
             col_n = f"col{i}"
             dataSpec = dataSpec.withColumn(col_n, "float", minValue=1, maxValue=10000000, random=True)
-
         df = dataSpec.build()
-
         return df
 
 spark = SparkSession \
     .builder \
     .appName("DATA GENERATION") \
+    .config("spark.kerberos.access.hadoopFileSystems", f"{s3_data_bucket}")\
     .config("spark.sql.catalog.spark_catalog", "org.apache.iceberg.spark.SparkSessionCatalog")\
     .config("spark.sql.catalog.spark_catalog.type", "hive")\
     .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")\
@@ -84,5 +88,6 @@ modinDG = DataGen(spark)
 
 STORAGE="s3a://paul-aug26-buk-a3c2b50a/data/"
 sparkDf = modinDG.dataGen()
-sparkDf.write.format("parquet").mode("overwrite").save(STORAGE+"pdefusco/modin/10kcols_100parts")
+sparkDf.write.format("parquet").mode("overwrite").save(STORAGE+f"{s3_data_prefix}")
 #transactionsDf.write.format("json").mode("overwrite").save("/home/cdsw/jsonData2.json")
+
